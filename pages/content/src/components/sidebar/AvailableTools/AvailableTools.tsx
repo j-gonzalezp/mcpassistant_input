@@ -8,7 +8,7 @@ import { Card, CardHeader, CardContent } from '@src/components/ui/card';
 
 interface AvailableToolsProps {
   tools: Tool[];
-  onExecute: (tool: Tool) => void;
+  onExecute: (tool: Tool) => Promise<string>;
   onRefresh: () => void;
   isRefreshing: boolean;
 }
@@ -17,6 +17,13 @@ const AvailableTools: React.FC<AvailableToolsProps> = ({ tools, onExecute, onRef
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [isExpanded, setIsExpanded] = useState(true);
+  // BEGIN MCP-SuperAssistant MODIFIED STATES
+  const [executionResult, setExecutionResult] = useState<any>(null);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [isExecuting, setIsExecuting] = useState<boolean>(false);
+  const [lastExecutedToolName, setLastExecutedToolName] = useState<string | null>(null);
+  const [processedDataType, setProcessedDataType] = useState<'json' | 'text' | 'success' | 'error' | null>(null);
+  // END MCP-SuperAssistant MODIFIED STATES
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Mark component as loaded after initial render
@@ -57,10 +64,68 @@ const AvailableTools: React.FC<AvailableToolsProps> = ({ tools, onExecute, onRef
       (tool.description && tool.description.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
-  const handleExecute = (tool: Tool) => {
-    logMessage(`[AvailableTools] Executing tool: ${tool.name}`);
-    onExecute(tool);
+  // BEGIN MCP-SuperAssistant MODIFIED handleExecute
+  const handleExecute = async (tool: Tool) => {
+    // tool.args debe ser un objeto. Ensure Tool type supports .args or handle appropriately.
+    logMessage(`[AvailableTools - AIStudioContext] Attempting to execute Serena tool: ${tool.name} with args:`, tool.args);
+    setIsExecuting(true);
+    setExecutionResult(null);
+    setExecutionError(null);
+    setLastExecutedToolName(tool.name);
+    setProcessedDataType(null);
+    try {
+      const rawMcpResultString: string = await onExecute(tool);
+      logMessage(`[AvailableTools - AIStudioContext] Raw MCP result from Serena for ${tool.name}: ${rawMcpResultString.substring(0, 300)}...`);
+      
+      let dataForDisplay: any = null;
+      let errorMsg: string | null = null;
+      let uiDataType: 'json' | 'text' | 'success' | 'error' = 'text';
+
+      if (typeof rawMcpResultString !== 'string') {
+        throw new Error("Result from Serena MCP is not a string.");
+      }
+
+      try {
+        dataForDisplay = JSON.parse(rawMcpResultString);
+        uiDataType = 'json';
+        logMessage("[AvailableTools - AIStudioContext] Parsed Serena result as JSON:", dataForDisplay);
+      } catch (e) {
+        dataForDisplay = rawMcpResultString;
+        logMessage("[AvailableTools - AIStudioContext] Serena result is plain text:", dataForDisplay);
+
+        if (dataForDisplay === "OK") {
+          uiDataType = 'success';
+          dataForDisplay = "Operation successful.";
+        } else if (dataForDisplay.toLowerCase().startsWith("error:") || 
+                   dataForDisplay.toLowerCase().includes("failed to") ||
+                   dataForDisplay.toLowerCase().includes("not found")) {
+          uiDataType = 'error';
+          errorMsg = dataForDisplay;
+        } else {
+          uiDataType = 'text';
+        }
+      }
+
+      if (uiDataType === 'error') {
+        setExecutionError(errorMsg || "An error occurred with the tool.");
+        setExecutionResult(null);
+      } else {
+        setExecutionResult(dataForDisplay);
+        setExecutionError(null);
+      }
+      setProcessedDataType(uiDataType);
+           
+    } catch (error) {
+      logMessage(`[AvailableTools - AIStudioContext] Error during onExecute for ${tool.name}:`, error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown execution error";
+      setExecutionError(errorMessage);
+      setExecutionResult(null);
+      setProcessedDataType('error');
+    } finally {
+      setIsExecuting(false);
+    }
   };
+  // END MCP-SuperAssistant MODIFIED handleExecute
 
   const handleRefresh = () => {
     logMessage('[AvailableTools] Refreshing available tools');
@@ -98,6 +163,30 @@ const AvailableTools: React.FC<AvailableToolsProps> = ({ tools, onExecute, onRef
             size="sm"
             className={cn('text-slate-700 dark:text-slate-300', isRefreshing ? 'animate-spin' : '')}
           />
+          {/* BEGIN MCP-SuperAssistant EXECUTION RESULT DISPLAY */}
+          {isExecuting && <Typography variant="body" className="my-2 text-center">Executing {lastExecutedToolName}...</Typography>}
+          {executionError && (
+            <div className="p-2 my-2 text-red-700 bg-red-100 border border-red-400 rounded">
+              <Typography variant="h6" className="font-semibold">Error:</Typography>
+              <pre className="text-xs whitespace-pre-wrap">{executionError}</pre>
+            </div>
+          )}
+          {executionResult && processedDataType && !executionError && (
+            <div className="p-3 my-2 border border-slate-300 dark:border-slate-600 rounded bg-slate-50 dark:bg-slate-800">
+              <Typography variant="h6" className="font-semibold">Result from: {lastExecutedToolName}</Typography>
+              {(processedDataType === 'json') && (
+                <pre className="text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">
+                  {JSON.stringify(executionResult, null, 2)}
+                </pre>
+              )}
+              {(processedDataType === 'text' || processedDataType === 'success') && (
+                <pre className="text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">
+                  {executionResult}
+                </pre>
+              )}
+            </div>
+          )}
+          {/* END MCP-SuperAssistant EXECUTION RESULT DISPLAY */}
         </Button>
       </CardHeader>
 
