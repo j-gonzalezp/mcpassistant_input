@@ -1,3 +1,4 @@
+// C:\Users\joaqu\mcpfiles\MCP-SuperAssistant-main\pages\content\src\adapters\common\baseAdapter.ts
 /**
  * Base Site Adapter
  *
@@ -5,57 +6,45 @@
  * that can be extended by site-specific adapters.
  */
 
-import type { SiteAdapter } from '../../utils/siteAdapter';
-import { logMessage } from '../../utils/helpers';
+import type { SiteAdapter } from '../../utils/siteAdapter'; // Verifica esta ruta
+import { logMessage } from '../../utils/helpers'; // Verifica esta ruta
 
 export abstract class BaseAdapter implements SiteAdapter {
   abstract name: string;
   abstract hostname: string | string[];
   urlPatterns?: RegExp[];
   protected sidebarManager: any = null;
-  // protected toolDetector: SimpleToolDetector = createToolDetector();
 
-  // Abstract methods that must be implemented by site-specific adapters
   protected abstract initializeObserver(forceReset?: boolean): void;
   protected initializeSidebarManager(): void {
-    // Default implementation - can be overridden by subclasses
     if (this.sidebarManager) {
       this.sidebarManager.initialize();
     }
   }
 
-  // Abstract methods for text insertion and form submission
   abstract insertTextIntoInput(text: string): void;
   abstract triggerSubmission(): void;
 
   initialize(): void {
     logMessage(`Initializing ${this.name} adapter`);
-
-    // Initialize the sidebar manager if it exists
     if (this.sidebarManager) {
       logMessage(`Initializing sidebar manager for ${this.name}`);
       this.initializeSidebarManager();
     } else {
       logMessage(`No sidebar manager found for ${this.name}`);
     }
-
-    // Initialize the unified observer
     logMessage(`Initializing unified observer for ${this.name} elements`);
     this.initializeObserver(true);
   }
 
   cleanup(): void {
     logMessage(`Cleaning up ${this.name} adapter`);
-
     if (this.sidebarManager) {
       this.sidebarManager.destroy();
       this.sidebarManager = null;
     }
   }
 
-  /**
-   * Show the sidebar with tool outputs
-   */
   showSidebarWithToolOutputs(): void {
     if (this.sidebarManager) {
       this.sidebarManager.showWithToolOutputs();
@@ -76,16 +65,8 @@ export abstract class BaseAdapter implements SiteAdapter {
 
   updateConnectionStatus(isConnected: boolean): void {
     logMessage(`Updating ${this.name} connection status: ${isConnected}`);
-    // Implement connection status update if needed
-    // if (this.overlayManager) {
-    //   this.overlayManager.updateConnectionStatus(isConnected);
-    // }
   }
 
-  /**
-   * Force refresh the sidebar content
-   * This can be called to manually refresh the sidebar when needed
-   */
   refreshSidebarContent(): void {
     logMessage(`Forcing sidebar content refresh for ${this.name}`);
     if (this.sidebarManager) {
@@ -94,21 +75,24 @@ export abstract class BaseAdapter implements SiteAdapter {
     }
   }
 
-  /**
-   * Check if the site supports file upload
-   * Default implementation returns false, override in site-specific adapters if supported
-   */
   supportsFileUpload(): boolean {
     return false;
   }
 
-  /**
-   * Attach a file to the chat input
-   * Default implementation returns a rejected promise, override in site-specific adapters if supported
-   * @param file The file to attach
-   */
   async attachFile(file: File): Promise<boolean> {
     logMessage(`File attachment not supported for ${this.name}`);
     return Promise.resolve(false);
   }
+
+  // --- NUEVO MÉTODO AÑADIDO ---
+  /**
+   * Gets the primary scrollable element for the site's main content area.
+   * This method should be overridden by specific adapters that require auto-scrolling.
+   * @returns The scrollable HTMLElement or null if not found or not applicable.
+   */
+  public getScrollableElement(): HTMLElement | null {
+    logMessage(`[${this.name}Adapter] getScrollableElement() is not implemented.`);
+    return null;
+  }
+  // --- FIN NUEVO MÉTODO ---
 }

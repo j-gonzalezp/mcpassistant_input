@@ -1,48 +1,155 @@
+// C:\Users\joaqu\mcpfiles\MCP-SuperAssistant-main\pages\content\src\index.ts
 /**
  * Content Script
- *
- * This is the entry point for the content script that runs on web pages.
- * Tailwind CSS is imported for future styling needs.
  */
 
 import './tailwind-input.css';
-// import { sendAnalyticsEvent, trackError } from '../../../../chrome-extension/utils/analytics'; // Removed direct import
 import { logMessage } from '@src/utils/helpers';
 import { mcpHandler } from '@src/utils/mcpHandler';
-
-// Import the render script functions
 import {
   initialize as initializeRenderer,
   startDirectMonitoring,
   stopDirectMonitoring,
-  processFunctionCalls as renderFunctionCalls, // Expose a function to trigger rendering
-  checkForUnprocessedFunctionCalls, // Allow checking for missed calls
-  configureFunctionCallRenderer, // Allow configuration from sidebar/background
+  processFunctionCalls as renderFunctionCalls,
+  checkForUnprocessedFunctionCalls,
+  configureFunctionCallRenderer,
 } from '@src/render_prescript/src/index';
-
-// Import the adapter registry
 import { adapterRegistry, getCurrentAdapter } from '@src/adapters/adapterRegistry';
+import './adapters'; // Importa y registra los adaptadores
 
-// Import and register all site adapters
-import './adapters';
+// --- NUEVO: Importar utilidades de storage ---
+import { getSidebarPreferences, saveSidebarPreferences } from '@src/utils/storage';
+// --- FIN NUEVO ---
 
-// Add this as a global recovery mechanism for the sidebar
+// --- INICIO: LÓGICA DE AUTO-SCROLL ---
+const AUTO_SCROLL_INTERVAL_MS = 15000; // Intervalo de 15 segundos
+let isAutoScrollActive = false; // Estado global para el auto-scroll
+let autoScrollIntervalId: number | null = null;
+
+/**
+ * Realiza el scroll en el elemento designado por el adaptador actual si el auto-scroll está activo.
+ */
+function performPeriodicScroll(): void {
+  if (!isAutoScrollActive) return; // Solo actuar si está activo
+
+  const adapter = getCurrentAdapter();
+  // Solo proceder si el adaptador es AiStudio y tiene el método getScrollableElement
+  if (adapter && adapter.name === 'AiStudio' && typeof adapter.getScrollableElement === 'function') {
+    const scrollableDiv = adapter.getScrollableElement();
+    if (scrollableDiv) {
+      const isNearBottom = (scrollableDiv.scrollHeight - scrollableDiv.scrollTop - scrollableDiv.clientHeight) < 10;
+      if (!isNearBottom) {
+        const scrollAmount = Math.min(
+          scrollableDiv.clientHeight * 0.8, 
+          scrollableDiv.scrollHeight - scrollableDiv.scrollTop - scrollableDiv.clientHeight
+        );
+        if (scrollAmount > 0) {
+          scrollableDiv.scrollTop += scrollAmount;
+          logMessage(`[AutoScroll] Scrolled content on ${adapter.name}`);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Inicia el intervalo de auto-scroll si está activo y no ya corriendo.
+ */
+function startAutoScroll(): void {
+  if (isAutoScrollActive && autoScrollIntervalId === null) {
+    const adapter = getCurrentAdapter();
+    if (adapter && adapter.name === 'AiStudio') { // Asegurarse de que solo se active para AI Studio
+        logMessage('[AutoScroll] Starting periodic scroll for AiStudio adapter.');
+        autoScrollIntervalId = window.setInterval(performPeriodicScroll, AUTO_SCROLL_INTERVAL_MS);
+    }
+  }
+}
+
+/**
+ * Detiene el intervalo de auto-scroll si está activo.
+ */
+function stopAutoScroll(): void {
+  if (autoScrollIntervalId !== null) {
+    logMessage('[AutoScroll] Stopping periodic scroll.');
+    window.clearInterval(autoScrollIntervalId);
+    autoScrollIntervalId = null;
+  }
+}
+
+/**
+ * Actualiza el estado del auto-scroll y lo persiste en el storage.
+ * Esta función será llamada por el Sidebar.
+ */
+async function setAutoScrollStateAndPersist(isActive: boolean): Promise<void> {
+  isAutoScrollActive = isActive;
+  logMessage(`[AutoScroll] State changed to: ${isActive}`);
+  
+  if (isActive) {
+    startAutoScroll();
+  } else {
+    stopAutoScroll();
+  }
+  
+  try {
+    await saveSidebarPreferences({ isAutoScrollActive: isActive });
+    logMessage(`[AutoScroll] Preference saved to storage: isAutoScrollActive = ${isActive}`);
+  } catch (error) {
+    logMessage(`[AutoScroll] Error saving auto-scroll preference: ${error}`);
+  }
+}
+
+/**
+ * Obtiene el estado actual del auto-scroll.
+ * Esta función será llamada por el Sidebar para inicializar su toggle.
+ */
+function getAutoScrollState(): boolean {
+  return isAutoScrollActive;
+}
+
+// Exponer la API para el Sidebar
+if (typeof window !== 'undefined') {
+  (window as any).mcpContentScriptApi = {
+    ...(window as any).mcpContentScriptApi, // Preservar otras APIs si existen
+    setAutoScrollState: setAutoScrollStateAndPersist,
+    getAutoScrollState: getAutoScrollState,
+  };
+  logMessage('[ContentScript] Auto-scroll API exposed to window.mcpContentScriptApi');
+}
+
+/**
+ * Carga las preferencias iniciales para el auto-scroll y lo inicia si es aplicable.
+ */
+async function initializeAutoScroll(): Promise<void> {
+  try {
+    const preferences = await getSidebarPreferences();
+    isAutoScrollActive = preferences.isAutoScrollActive ?? false; // Usar default si no existe
+    logMessage(`[AutoScroll] Initialized. Active state from storage: ${isAutoScrollActive}`);
+    // Intentar iniciar el scroll basado en el estado cargado y el adaptador actual
+    const adapter = getCurrentAdapter();
+    if (adapter && adapter.name === 'AiStudio' && isAutoScrollActive) {
+        startAutoScroll();
+    } else if (isAutoScrollActive && (!adapter || adapter.name !== 'AiStudio')) {
+        // Si estaba activo pero no estamos en AI Studio, lo desactivamos lógicamente
+        isAutoScrollActive = false; 
+        logMessage('[AutoScroll] Was active in storage, but not on AI Studio. Setting to inactive.');
+    }
+
+  } catch (error) {
+    logMessage(`[AutoScroll] Error initializing auto-scroll state from storage: ${error}`);
+    isAutoScrollActive = false; // Default a false en caso de error
+  }
+}
+// --- FIN: LÓGICA DE AUTO-SCROLL ---
+
 function setupSidebarRecovery(): void {
-  // Watch for the case where push mode is enabled but sidebar isn't visible
+  // ... (código de setupSidebarRecovery sin cambios)
   const recoveryInterval = setInterval(() => {
     try {
-      // Check if there's an active sidebar manager
       const sidebarManager = (window as any).activeSidebarManager;
       if (!sidebarManager) return;
-
-      // Get HTML element to check for push-mode-enabled class
       const htmlElement = document.documentElement;
-
-      // Check if push mode is enabled but host is invisible or missing
       if (htmlElement.classList.contains('push-mode-enabled')) {
         const shadowHost = sidebarManager.getShadowHost();
-
-        // If shadow host exists but is not visible, force it
         if (shadowHost) {
           if (
             shadowHost.style.display !== 'block' ||
@@ -50,18 +157,14 @@ function setupSidebarRecovery(): void {
             shadowHost.style.opacity !== '1' ||
             parseFloat(window.getComputedStyle(shadowHost).opacity) < 0.9
           ) {
-            logMessage('[SidebarRecovery] Detected invisible sidebar with push mode enabled, forcing visibility');
+            logMessage('[SidebarRecovery] Detected invisible sidebar, forcing visibility');
             shadowHost.style.display = 'block';
             shadowHost.style.opacity = '1';
             shadowHost.classList.add('initialized');
-
-            // Also force a re-render
             sidebarManager.refreshContent();
           }
         } else {
-          // If shadow host doesn't exist but push mode is enabled,
-          // try to re-initialize the sidebar
-          logMessage('[SidebarRecovery] Push mode enabled but shadow host missing, re-initializing sidebar');
+          logMessage('[SidebarRecovery] Push mode enabled but shadow host missing, re-initializing');
           sidebarManager.initialize().then(() => {
             sidebarManager.show();
           });
@@ -70,121 +173,94 @@ function setupSidebarRecovery(): void {
     } catch (error) {
       console.error('[SidebarRecovery] Error:', error);
     }
-  }, 1000); // Check every second
-
-  // Clean up when navigating away
+  }, 1000);
   window.addEventListener('unload', () => {
     clearInterval(recoveryInterval);
   });
-
   logMessage('[SidebarRecovery] Sidebar recovery mechanism set up');
 }
 
-// Track which adapters have been initialized to prevent redundant initialization
 const initializedAdapters = new Set<string>();
-
-/**
- * Content Script Entry Point
- */
 logMessage('Content script loaded');
 
-// Ask background script to track the event
 try {
   chrome.runtime.sendMessage({
     command: 'trackAnalyticsEvent',
     eventName: 'content_script_loaded',
-    eventParams: {
-      hostname: window.location.hostname,
-      path: window.location.pathname,
-    },
+    eventParams: { hostname: window.location.hostname, path: window.location.pathname },
   });
 } catch (error) {
-  // This catch block is primarily for the rare case where the background script context is invalidated
-  // during the sendMessage call (e.g., extension update/reload). It won't catch errors in the background handler.
-  console.error(
-    '[ContentScript] Error sending analytics tracking message:',
-    error instanceof Error ? error.message : String(error),
-  );
+  console.error('[ContentScript] Error sending analytics:', error instanceof Error ? error.message : String(error));
 }
 
-// Add this call right before your existing script loads
 setupSidebarRecovery();
 
-// Initialize the renderer at the earliest possible moment (styles are injected automatically)
-// This ensures function call blocks are hidden before they can be seen by the user
 (function instantInitialize() {
   try {
-    // This will set up early observers to hide function blocks before they render
     initializeRenderer();
-    logMessage('Function call renderer initialized immediately at script load');
+    logMessage('Function call renderer initialized immediately');
   } catch (error) {
     console.error('Error in immediate renderer initialization:', error);
-    // If this fails, we'll try again with the standard approach
   }
 })();
 
-// Initialize the current site adapter regardless of MCP connection status
-(function initializeCurrentAdapter() {
+// --- MODIFICADO: Llamar a initializeAutoScroll ---
+(async function initializeCurrentAdapterAndAutoScroll() { // Convertido a async
   try {
+    // Primero inicializar el estado del auto-scroll desde el storage
+    await initializeAutoScroll(); 
+
     const currentHostname = window.location.hostname;
     const adapter = adapterRegistry.getAdapter(currentHostname);
 
     if (adapter) {
       const adapterId = adapter.name;
-
       if (!initializedAdapters.has(adapterId)) {
-        logMessage(`Initializing site adapter for ${adapter.name} (regardless of MCP connection)`);
-
-        // Always initialize the adapter to ensure UI is visible
+        logMessage(`Initializing site adapter for ${adapter.name}`);
         adapter.initialize();
-
-        // Mark this adapter as initialized
         initializedAdapters.add(adapterId);
-
-        // Set the adapter globally
-        window.mcpAdapter = adapter;
+        (window as any).mcpAdapter = adapter;
         logMessage(`Exposed adapter ${adapter.name} to global window.mcpAdapter`);
       } else {
-        logMessage(`Adapter ${adapter.name} already initialized, skipping initialization`);
+        logMessage(`Adapter ${adapter.name} already initialized, skipping re-initialization`);
+        (window as any).mcpAdapter = adapter;
+      }
+      // El estado de auto-scroll ya se cargó, startAutoScroll se llamó si era aplicable
+      // Si el adaptador cambia (navegación SPA), necesitamos re-evaluar
+      if (isAutoScrollActive && adapter.name === 'AiStudio') {
+          startAutoScroll(); // Asegurar que se inicie si el adaptador es el correcto y está activo
+      } else {
+          stopAutoScroll(); // Detener si no es el adaptador correcto
       }
     } else {
       logMessage('No adapter found for current hostname, cannot initialize');
+      stopAutoScroll(); 
     }
   } catch (error) {
-    console.error('Error initializing current adapter:', error);
+    console.error('Error initializing current adapter and/or auto-scroll:', error);
+    stopAutoScroll();
   }
 })();
 
-// Initialize MCP handler and set up connection status listener
 mcpHandler.onConnectionStatusChanged(isConnected => {
   logMessage(`MCP connection status changed: ${isConnected ? 'Connected' : 'Disconnected'}`);
-
-  // Update connection status in the current site adapter
   const currentHostname = window.location.hostname;
   const adapter = adapterRegistry.getAdapter(currentHostname);
   if (adapter) {
-    // Update connection status regardless of initialization state
     adapter.updateConnectionStatus(isConnected);
-
-    // Ensure the adapter is always set globally
-    window.mcpAdapter = adapter;
+    (window as any).mcpAdapter = adapter;
   }
 });
 
-// Improved initialization strategy for the function call renderer
 let rendererInitialized = false;
-
-// More robust initialization with retries if immediate initialization failed
 const initRendererWithRetry = (retries = 3, delay = 300) => {
-  if (rendererInitialized) return; // Don't try again if already initialized
-
+  // ... (código de initRendererWithRetry sin cambios)
+  if (rendererInitialized) return;
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
     try {
-      initializeRenderer();
+      initializeRenderer(); 
       rendererInitialized = true;
       logMessage('Function call renderer initialized successfully on retry.');
-
-      // Process any function calls that might have been missed
       setTimeout(() => {
         if (rendererInitialized) {
           renderFunctionCalls();
@@ -194,36 +270,25 @@ const initRendererWithRetry = (retries = 3, delay = 300) => {
     } catch (error) {
       console.error('Error initializing function call renderer:', error);
       if (retries > 0) {
-        logMessage(`Retrying renderer initialization in ${delay}ms... (${retries} retries left)`);
         setTimeout(() => initRendererWithRetry(retries - 1, delay), delay);
-      } else {
-        logMessage('Failed to initialize function call renderer after multiple retries.');
       }
     }
   } else {
-    // DOM not fully ready, schedule another check
-    logMessage('DOM not ready for renderer initialization, retrying...');
-    setTimeout(() => initRendererWithRetry(retries, delay), 100); // Use shorter delay for readyState check
+    setTimeout(() => initRendererWithRetry(retries, delay), 100);
   }
 };
 
-// Also set up the standard initialization path as a fallback
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    if (!rendererInitialized) {
-      initRendererWithRetry();
-    }
+    if (!rendererInitialized) initRendererWithRetry();
   });
 } else {
-  // If DOMContentLoaded already fired but initialization failed earlier
-  if (!rendererInitialized) {
-    initRendererWithRetry();
-  }
+  if (!rendererInitialized) initRendererWithRetry();
 }
 
-// Listen for messages from the background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  logMessage(`Message received in content script: ${JSON.stringify(message)}`); // Log all incoming messages
+  // ... (código de onMessage sin cambios)
+  logMessage(`Message received in content script: ${JSON.stringify(message.command || message.type)}`);
   const currentHostname = window.location.hostname;
   const adapter = adapterRegistry.getAdapter(currentHostname);
 
@@ -236,7 +301,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       },
     });
   } else if (message.command === 'toggleSidebar') {
-    // Use the site adapter to toggle sidebar
     if (adapter) {
       adapter.toggleSidebar();
       sendResponse({ success: true });
@@ -244,7 +308,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: false, error: 'No active site adapter' });
     }
   } else if (message.command === 'showSidebarWithToolOutputs') {
-    // Show the sidebar with tool outputs
     if (adapter) {
       adapter.showSidebarWithToolOutputs();
       sendResponse({ success: true });
@@ -252,7 +315,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: false, error: 'No active site adapter' });
     }
   } else if (message.command === 'callMcpTool') {
-    // Handle MCP tool call requests from popup
     const { toolName, args } = message;
     if (toolName && args) {
       mcpHandler.callTool(toolName, args, (result, error) => {
@@ -262,12 +324,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: true, result });
         }
       });
-      return true; // Indicate we'll respond asynchronously
+      return true; 
     } else {
       sendResponse({ success: false, error: 'Invalid tool call request' });
     }
   } else if (message.command === 'refreshSidebarContent') {
-    // Refresh the sidebar content
     if (adapter) {
       adapter.refreshSidebarContent();
       sendResponse({ success: true });
@@ -275,71 +336,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: false, error: 'No active site adapter' });
     }
   } else if (message.command === 'setFunctionCallRendering') {
-    // Handle toggling function call rendering
     const { enabled } = message;
     if (rendererInitialized) {
       if (enabled) {
-        logMessage('Starting function call monitoring.');
         startDirectMonitoring();
-        // Run a check immediately after enabling
         renderFunctionCalls();
         checkForUnprocessedFunctionCalls();
       } else {
-        logMessage('Stopping function call monitoring.');
         stopDirectMonitoring();
       }
       sendResponse({ success: true });
     } else {
-      logMessage('Cannot toggle function call rendering: Renderer not initialized.');
       sendResponse({ success: false, error: 'Renderer not initialized' });
     }
   } else if (message.command === 'forceRenderFunctionCalls') {
-    // Force a re-render/check for function calls
     if (rendererInitialized) {
-      logMessage('Forcing function call render check.');
       renderFunctionCalls();
       checkForUnprocessedFunctionCalls();
       sendResponse({ success: true });
     } else {
-      logMessage('Cannot force render: Renderer not initialized.');
       sendResponse({ success: false, error: 'Renderer not initialized' });
     }
   } else if (message.command === 'configureRenderer') {
-    // Configure the renderer
     if (rendererInitialized) {
-      logMessage(`Configuring function call renderer with options: ${JSON.stringify(message.options)}`);
       configureFunctionCallRenderer(message.options);
       sendResponse({ success: true });
     } else {
-      logMessage('Cannot configure renderer: Not initialized.');
       sendResponse({ success: false, error: 'Renderer not initialized' });
     }
   }
-
-  // Always return true if you want to use sendResponse asynchronously
   return true;
 });
 
-// Handle page unload to clean up resources
 window.addEventListener('beforeunload', () => {
-  // Clean up site adapter resources
+  logMessage('[ContentScript] beforeunload event triggered.');
+  stopAutoScroll(); // --- NUEVO: Detener el auto-scroll ---
+
   const currentHostname = window.location.hostname;
   const adapter = adapterRegistry.getAdapter(currentHostname);
   if (adapter) {
     adapter.cleanup();
   }
-
-  // Clear the initialized adapters set
   initializedAdapters.clear();
 });
 
-// Expose mcpHandler to the global window object for renderer access
 (window as any).mcpHandler = mcpHandler;
-console.debug('[Content Script] mcpHandler exposed to window object for renderer use.');
+console.debug('[Content Script] mcpHandler exposed to window object.');
 
-// Set the current adapter to global window object
-const currentAdapter = getCurrentAdapter();
-if (currentAdapter) {
-  window.mcpAdapter = currentAdapter;
-  console.debug(`[Content Script] Current adapter (${currentAdapter.name}) exposed to window object as mcpAdapter.`);
-}
+// --- MODIFICADO: La inicialización del adaptador y auto-scroll ya se hizo arriba en initializeCurrentAdapterAndAutoScroll ---
+// const currentAdapterOnLoad = getCurrentAdapter();
+// if (currentAdapterOnLoad) {
+//   (window as any).mcpAdapter = currentAdapterOnLoad;
+//   console.debug(`[Content Script] Current adapter (${currentAdapterOnLoad.name}) exposed.`);
+// }

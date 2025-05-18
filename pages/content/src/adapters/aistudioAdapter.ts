@@ -1,19 +1,20 @@
+// C:\Users\joaqu\mcpfiles\MCP-SuperAssistant-main\pages\content\src\adapters\aistudioAdapter.ts
 /**
  * AiStudio Adapter
- *
- * This file implements the site adapter for aistudio.google.com
  */
 
-import { BaseAdapter } from './common';
+import { BaseAdapter } from './common'; 
 import { logMessage } from '../utils/helpers';
+// --- IMPORTACIONES CORREGIDAS Y COMPLETAS ---
 import { 
   insertToolResultToChatInput, 
   attachFileToChatInput, 
   submitChatInput 
 } from '../components/websites/aistudio/chatInputHandler';
+// --- FIN IMPORTACIONES ---
+
 import { SidebarManager } from '../components/sidebar';
-// +++ MODIFICACIÓN: Asegurarse de que la importación esté ACTIVA +++
-import { initAIStudioComponents } from './adaptercomponents'; 
+import { initAIStudioComponents } from './adaptercomponents/aistudio'; 
 
 export class AiStudioAdapter extends BaseAdapter {
   name = 'AiStudio';
@@ -43,10 +44,7 @@ export class AiStudioAdapter extends BaseAdapter {
 
   protected initializeObserver(forceReset: boolean = false): void {
     logMessage('[AiStudioAdapter] initializeObserver: START');
-    
     this.checkCurrentUrl(); 
-    
-    // +++ MODIFICACIÓN: Llamar a initAIStudioComponents (ahora que está importada) +++
     if (typeof initAIStudioComponents === 'function') {
       logMessage('[AiStudioAdapter] initializeObserver: Attempting to call initAIStudioComponents()...');
       try {
@@ -57,26 +55,9 @@ export class AiStudioAdapter extends BaseAdapter {
         console.error('[AiStudioAdapter] Error during initAIStudioComponents execution:', error);
       }
     } else {
-      logMessage('[AiStudioAdapter] initializeObserver: initAIStudioComponents is not defined or not a function. Button MCP might not appear.');
-      console.warn('[AiStudioAdapter] initAIStudioComponents is not available. Site-specific components beyond the sidebar might not load.');
+      logMessage('[AiStudioAdapter] initializeObserver: initAIStudioComponents is not defined or not a function.');
+      console.warn('[AiStudioAdapter] initAIStudioComponents is not available.');
     }
-
-    // La lógica de URL checking puede reactivarse si es necesaria y no causa problemas.
-    // if (!this.urlCheckInterval) {
-    //   this.lastUrl = window.location.href;
-    //   this.urlCheckInterval = window.setInterval(() => {
-    //     const currentUrl = window.location.href;
-    //     if (currentUrl !== this.lastUrl) {
-    //       logMessage(`[AiStudioAdapter] URL changed from ${this.lastUrl} to ${currentUrl}`);
-    //       this.lastUrl = currentUrl;
-    //       if (typeof initAIStudioComponents === 'function') {
-    //          try { initAIStudioComponents(); } catch (e) { console.error(e); }
-    //       }
-    //       this.checkCurrentUrl();
-    //     }
-    //   }, 1000);
-    //   logMessage('[AiStudioAdapter] initializeObserver: URL check interval STARTED.');
-    // }
     logMessage('[AiStudioAdapter] initializeObserver: END');
   }
 
@@ -91,46 +72,53 @@ export class AiStudioAdapter extends BaseAdapter {
     logMessage('[AiStudioAdapter] cleanup: END');
   }
 
-  async insertTextIntoInput(text: string): Promise<boolean> {
+  insertTextIntoInput(text: string): void {
     logMessage('[AiStudioAdapter] insertTextIntoInput: START');
-    try {
-      const success = await insertToolResultToChatInput(text);
-      logMessage(`[AiStudioAdapter] insertTextIntoInput: Attempted. Success: ${success}.`);
-      return success;
-    } catch (error) {
-      console.error('[AiStudioAdapter] Error calling insertToolResultToChatInput:', error);
-      logMessage(`[AiStudioAdapter] insertTextIntoInput: Error - ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    } finally {
-      logMessage('[AiStudioAdapter] insertTextIntoInput: END');
-    }
+    // insertToolResultToChatInput ya es async y devuelve Promise<boolean>
+    // BaseAdapter espera void, así que no podemos hacerla async aquí directamente.
+    // La función insertToolResultToChatInput ya tiene logging.
+    insertToolResultToChatInput(text)
+      .then(success => {
+        logMessage(`[AiStudioAdapter] insertTextIntoInput: insertToolResultToChatInput reported: ${success}`);
+      })
+      .catch(error => {
+        logMessage(`[AiStudioAdapter] insertTextIntoInput: Error from insertToolResultToChatInput - ${error}`);
+      })
+      .finally(() => {
+        logMessage('[AiStudioAdapter] insertTextIntoInput: END');
+      });
   }
 
-  async triggerSubmission(): Promise<boolean> {
-    logMessage('[AiStudioAdapter] triggerSubmission: START');
-    try {
-      const success = await submitChatInput(); 
-      logMessage(`[AiStudioAdapter] triggerSubmission: Attempted. Success: ${success}`);
-      return success;
-    } catch (error) {
-      logMessage(`[AiStudioAdapter] triggerSubmission: Error - ${error instanceof Error ? error.message : String(error)}`);
-      console.error('[AiStudioAdapter] Error triggering submission:', error);
-      return false;
-    } finally {
-      logMessage('[AiStudioAdapter] triggerSubmission: END');
-    }
+  // --- triggerSubmission ACTUALIZADO ---
+  triggerSubmission(): void {
+    logMessage('[AiStudioAdapter] triggerSubmission: START. Attempting to call submitChatInput...');
+    // submitChatInput es async y devuelve Promise<boolean>
+    // BaseAdapter espera void.
+    submitChatInput()
+      .then((success: boolean) => {
+        logMessage(`[AiStudioAdapter] triggerSubmission: submitChatInput call completed. Success: ${success}`);
+      })
+      .catch((error: Error) => {
+        logMessage(`[AiStudioAdapter] triggerSubmission: Error calling submitChatInput - ${error.message}`);
+        console.error('[AiStudioAdapter] Error in triggerSubmission calling submitChatInput:', error);
+      })
+      .finally(() => {
+        logMessage('[AiStudioAdapter] triggerSubmission: END');
+      });
   }
+  // --- FIN triggerSubmission ACTUALIZADO ---
 
   supportsFileUpload(): boolean {
-    logMessage('[AiStudioAdapter] supportsFileUpload called');
+    logMessage('[AiStudioAdapter] supportsFileUpload called, returning true.');
     return true; 
   }
 
+  // --- attachFile ACTUALIZADO ---
   async attachFile(file: File): Promise<boolean> {
-    logMessage('[AiStudioAdapter] attachFile: START');
+    logMessage(`[AiStudioAdapter] attachFile: START for file ${file.name}`);
     try {
-      const result = await attachFileToChatInput(file);
-      logMessage(`[AiStudioAdapter] attachFile: Attempted. Result: ${result}`);
+      const result = await attachFileToChatInput(file); // Llamada a la función importada
+      logMessage(`[AiStudioAdapter] attachFile: attachFileToChatInput call completed. Result: ${result}`);
       return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -138,9 +126,10 @@ export class AiStudioAdapter extends BaseAdapter {
       console.error('[AiStudioAdapter] Error attaching file:', error);
       return false;
     } finally {
-      logMessage('[AiStudioAdapter] attachFile: END');
+      logMessage(`[AiStudioAdapter] attachFile: END for file ${file.name}`);
     }
   }
+  // --- FIN attachFile ACTUALIZADO ---
 
   private checkCurrentUrl(): void {
     logMessage('[AiStudioAdapter] checkCurrentUrl: START');
@@ -165,5 +154,16 @@ export class AiStudioAdapter extends BaseAdapter {
       console.error('[AiStudioAdapter] sidebarManager is null in checkCurrentUrl');
     }
     logMessage('[AiStudioAdapter] checkCurrentUrl: END');
+  }
+
+  public override getScrollableElement(): HTMLElement | null {
+    const selector = 'ms-autoscroll-container';
+    const element = document.querySelector(selector) as HTMLElement | null;
+    if (!element) {
+      logMessage(`[${this.name}Adapter] Scrollable element not found with selector: "${selector}"`);
+    } else {
+      logMessage(`[${this.name}Adapter] Found scrollable element with selector: "${selector}"`);
+    }
+    return element;
   }
 }

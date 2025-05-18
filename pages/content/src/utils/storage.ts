@@ -1,3 +1,4 @@
+// C:\Users\joaqu\mcpfiles\MCP-SuperAssistant-main\pages\content\src\utils\storage.ts
 import { logMessage } from './helpers';
 
 // Types
@@ -7,6 +8,7 @@ export interface SidebarPreferences {
   isMinimized: boolean;
   autoSubmit: boolean;
   theme: 'light' | 'dark' | 'system';
+  isAutoScrollActive?: boolean; // <--- NUEVA PROPIEDAD
 }
 
 // Tool Permissions
@@ -28,6 +30,7 @@ const DEFAULT_PREFERENCES: SidebarPreferences = {
   isMinimized: false,
   autoSubmit: false,
   theme: 'system',
+  isAutoScrollActive: false, // <--- VALOR POR DEFECTO PARA LA NUEVA PROPIEDAD
 };
 
 /**
@@ -49,9 +52,10 @@ export const getSidebarPreferences = async (): Promise<SidebarPreferences> => {
     }
 
     logMessage('[Storage] Retrieved sidebar preferences from storage');
+    // Merge con defaults para asegurar que todas las claves existan, incluyendo la nueva
     return {
       ...DEFAULT_PREFERENCES,
-      ...(preferences || {}),
+      ...preferences,
     };
   } catch (error) {
     logMessage(
@@ -108,7 +112,6 @@ export const getToolPermissions = (): ToolPermission[] => {
  * Only 'always' permissions are stored, 'once' and 'never' are not stored
  */
 export const saveToolPermission = (permission: ToolPermission): void => {
-  // Skip saving if permission is 'once' or 'never'
   if (permission.permission === 'once' || permission.permission === 'never') {
     logMessage(
       `[Storage] Skipping save for ${permission.permission} permission for ${permission.serverName}.${permission.toolName} on ${permission.url}`,
@@ -118,13 +121,10 @@ export const saveToolPermission = (permission: ToolPermission): void => {
 
   try {
     const currentPermissions = getToolPermissions();
-
-    // Remove any existing permission for this tool and URL
     const filteredPermissions = currentPermissions.filter(
       p => !(p.serverName === permission.serverName && p.toolName === permission.toolName && p.url === permission.url),
     );
 
-    // Only add the new permission if it's 'always'
     if (permission.permission === 'always') {
       filteredPermissions.push(permission);
       logMessage(
@@ -148,7 +148,6 @@ export const checkToolPermission = (serverName: string, toolName: string): 'alwa
     const permissions = getToolPermissions();
     const currentUrl = window.location.href;
 
-    // Find permission for this tool and exact URL
     const permission = permissions.find(
       p => p.serverName === serverName && p.toolName === toolName && p.url === currentUrl,
     );
@@ -156,8 +155,6 @@ export const checkToolPermission = (serverName: string, toolName: string): 'alwa
     if (!permission) {
       return null;
     }
-
-    // Only 'always' permissions are stored, so we only return 'always'
     return permission.permission === 'always' ? 'always' : null;
   } catch (error) {
     logMessage(`[Storage] Error checking tool permission: ${error instanceof Error ? error.message : String(error)}`);
